@@ -1,0 +1,52 @@
+from pyspark.sql import SparkSession
+spark = SparkSession.builder.appName("NYC Taxi Emissions Analysis").getOrCreate()
+file_paths = [
+    "dbfs:/FileStore/tables/yellow_tripdata_2022_01.parquet",
+    "dbfs:/FileStore/tables/yellow_tripdata_2022_02.parquet",
+    "dbfs:/FileStore/tables/yellow_tripdata_2022_03.parquet",
+    "dbfs:/FileStore/tables/yellow_tripdata_2022_04.parquet",
+    "dbfs:/FileStore/tables/yellow_tripdata_2022_05.parquet",
+    "dbfs:/FileStore/tables/yellow_tripdata_2022_06.parquet",
+    "dbfs:/FileStore/tables/yellow_tripdata_2022_07.parquet",
+    "dbfs:/FileStore/tables/yellow_tripdata_2022_08.parquet",
+    "dbfs:/FileStore/tables/yellow_tripdata_2022_09.parquet",
+    "dbfs:/FileStore/tables/yellow_tripdata_2022_10.parquet",
+    "dbfs:/FileStore/tables/yellow_tripdata_2022_11.parquet",
+    "dbfs:/FileStore/tables/yellow_tripdata_2022_12.parquet"
+]
+
+df_list = [spark.read.parquet(file_path) for file_path in file_paths]
+combined_df = df_list[0]
+for df in df_list[1:]:
+    combined_df = combined_df.union(df)
+
+combined_df.show(5)
+
+from pyspark.sql.functions import col
+
+fuel_efficiency = 22
+emissions_factor = 8.89  
+combined_df = combined_df.withColumn("Fuel_Consumed_Gallons", col("trip_distance") / fuel_efficiency)
+combined_df = combined_df.withColumn("CO2_Emissions_kg", col("Fuel_Consumed_Gallons") * emissions_factor)
+combined_df.select("trip_distance", "Fuel_Consumed_Gallons", "CO2_Emissions_kg").show(5)
+combined_df = combined_df.withColumn("pickup_date", col("tpep_pickup_datetime").cast("date"))
+emissions_per_day = combined_df.groupBy("pickup_date").sum("CO2_Emissions_kg").withColumnRenamed("sum(CO2_Emissions_kg)", "Total_CO2_Emissions_kg")
+
+emissions_1_2 = combined_df.filter(combined_df.passenger_count <= 2).groupBy("pickup_date").sum("CO2_Emissions_kg").withColumnRenamed("sum(CO2_Emissions_kg)", "Total_CO2_Emissions_kg_1_2")
+
+emissions_3_plus = combined_df.filter(combined_df.passenger_count >= 3).groupBy("pickup_date").sum("CO2_Emissions_kg").withColumnRenamed("sum(CO2_Emissions_kg)", "Total_CO2_Emissions_kg_3_plus")
+
+import matplotlib.pyplot as plt
+emissions_per_day_df = emissions_per_day.toPandas()
+emissions_1_2_df = emissions_1_2.toPandas()
+emissions_3_plus_df = emissions_3_plus.toPandas()
+
+plt.figure(figsize=(12, 6))
+plt.plot(emissions_per_day_df["pickup_date"], emissions_per_day_df["Total_CO2_Emissions_kg"], label="All Rides")
+plt.plot(emissions_1_2_df["pickup_date"], emissions_1_2_df["Total_CO2_Emissions_kg_1_2"], label="1-2 Passengers")
+plt.plot(emissions_3_plus_df["pickup_date"], emissions_3_plus_df["Total_CO2_Emissions_kg_3_plus"], label="3+ Passengers")
+plt.xlabel("Date")
+plt.ylabel("Total CO2 Emissions (kg)")
+plt.title("Total CO2 Emissions per Day")
+plt.legend()
+plt.show()
